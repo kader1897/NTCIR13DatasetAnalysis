@@ -1,6 +1,12 @@
+import com.google.gson.Gson;
+import com.mongodb.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import model.*;
+import org.bson.Document;
 import org.xml.sax.SAXException;
 
+import javax.print.Doc;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
@@ -9,14 +15,11 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Scanner;
-import java.util.Set;
+import java.util.*;
 
 public class Main {
 
-
+    private static Gson gson = new Gson();
 
     public static void main(String[] args) throws ParserConfigurationException, SAXException, IOException {
 
@@ -26,8 +29,9 @@ public class Main {
 
         try {
             users = parseXmlFile(xmlFile);
-            databaseOperations(users);
-            printDataSummary(users);
+            mongoDBOperations(users);
+            //databaseOperations(users);
+            //printDataSummary(users);
             //parseImageLabels(imageLabelsFile);
 
         } catch (Exception e) {
@@ -35,6 +39,89 @@ public class Main {
         }
 
 
+    }
+
+    private static void mongoDBOperations(List<User> users)
+    {
+        final String DB_NAME = "NTCIR13LifelogDataset";
+
+        System.out.println("Accessing MongoDB...");
+        MongoClient mongoClient = new MongoClient();
+
+        List<String> collList = new ArrayList<>();
+        MongoDatabase database = mongoClient.getDatabase(DB_NAME);
+        database.listCollectionNames().into(collList);
+        if(collList.size()>0)
+        {
+            database.drop();
+            database = mongoClient.getDatabase(DB_NAME);
+        }
+
+        MongoCollection<Document> collectionUsers = database.getCollection("Users");
+        MongoCollection<Document> collectionDays = database.getCollection("Days");
+        MongoCollection<Document> collectionMinutes = database.getCollection("Minutes");
+
+        System.out.println("Database and collections are created.");
+
+        for(User user : users)
+        {
+            Document newUser = new Document("_id", user.getId()).
+                    append("user_name", user.getUserId());
+            collectionUsers.insertOne(newUser);
+
+            List<Day> days = user.getDays();
+            List<Document> docDayList = new ArrayList<>();
+            for(Day day : days)
+            {
+                Document newDay = new Document("_id", day.getId());
+                newDay.append("user_id", user.getId());
+                newDay.append("date", day.getDate());
+                newDay.append("image_directory", day.getImageDirectory());
+                newDay.append("day_metrics", formatObjectAsDocument(day.getDayMetrics()));
+                newDay.append("day_activities", formatObjectAsDocument(day.getDayActivities()));
+                newDay.append("health_logs", formatObjectAsDocument(day.getHealthLogs()));
+                List<Document> docFoodLogs = new ArrayList<>();
+                day.getFoodLogs().stream().forEach((log)->docFoodLogs.add(formatObjectAsDocument(log)));
+                newDay.append("food_logs", docFoodLogs);
+
+                List<Document> docDrinkLogs = new ArrayList<>();
+                day.getFoodLogs().stream().forEach((log)->docDrinkLogs.add(formatObjectAsDocument(log)));
+                newDay.append("drink_logs", docDrinkLogs);
+
+                docDayList.add(newDay);
+
+                List<Minute> minutes = day.getMinutes();
+                List<Document> docMinuteList = new ArrayList<>();
+                for(Minute minute : minutes)
+                {
+                    Document newMinute = formatObjectAsDocument(minute);
+                    newMinute.append("day_id", day.getId());
+                    newMinute.append("user_id", user.getId());
+
+                    docMinuteList.add(newMinute);
+                }
+
+                collectionMinutes.insertMany(docMinuteList);
+
+            }
+
+            collectionDays.insertMany(docDayList);
+
+        }
+
+        //String jsonString = gson.toJson(users.get(0).getDays().get(0).getMinutes().get(0));
+
+        //System.out.println(jsonString);
+
+    }
+
+    private static Document formatObjectAsDocument(Object obj)
+    {
+        if(obj == null)
+            return null;
+
+        Document result = Document.parse(gson.toJson(obj));
+        return result;
     }
 
     private static List<User> parseXmlFile(String filename) throws ParserConfigurationException, SAXException, IOException {
