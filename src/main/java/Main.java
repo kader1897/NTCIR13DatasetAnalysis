@@ -34,10 +34,7 @@ public class Main {
             imageLabelMap = parseImageLabels(imageLabelsFile, labelSummaryOutFile);
             databaseOperations(users, imageLabelMap);
             mongoDBOperations(users, imageLabelMap);
-
-            //printDataSummary(users);
-
-
+            printDataSummary(users);
 
             //  db.Minutes.find({"images" : { $elemMatch : {"path" : "u2/2016-09-09/20160909_074643_000.jpg"}}}).toArray()
 
@@ -83,7 +80,7 @@ public class Main {
 
         //  Database credentials
         final String USERNAME = "root";
-        final String PASSWORD = "elveda";
+        final String PASSWORD = "pass";
 
         if(users == null || users.size() <= 0) {
             System.out.println("No user data!");
