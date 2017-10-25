@@ -1,6 +1,9 @@
 import model.*;
 
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -229,7 +232,7 @@ public class DatabaseController {
             stmt.executeBatch();
     }
 
-    public static void populateDatabase(List<User> users) {
+    public static void populateDatabase(List<User> users) throws SQLException {
         StringBuilder sb = null;
         Statement stmt = null;
         Integer userId, dayId, minuteId, dayMetricsId, dayActivitiesId, healthLogsId, locationId, bodyMetricsId, musicId;
@@ -487,10 +490,6 @@ public class DatabaseController {
 
                 }
             }
-        } catch (SQLException e)
-        {
-            e.printStackTrace();
-            return;
         }
         finally {
 
@@ -506,6 +505,47 @@ public class DatabaseController {
         }
     }
 
+    public static void insertImageLabels(HashMap<String, ArrayList<ImageLabel> > imageLabelMap) throws SQLException {
+        List< ArrayList<ImageLabel> > imageLabelList = (List<ArrayList<ImageLabel>>) imageLabelMap.values();
+        System.out.println("Inserting image labels to database...");
+        Statement stmt = null;
+
+        try {
+            conn.setAutoCommit(false);
+            stmt = conn.createStatement();
+
+            for(ArrayList<ImageLabel> imageLabels : imageLabelList)
+            {
+                for(ImageLabel imageLabel : imageLabels) {
+                    StringBuilder sb = new StringBuilder("INSERT INTO image_labels(id, path, label) " +
+                            " VALUES (" + imageLabel.getId() + ", '" +
+                            imageLabel.getPath() + "', '" + imageLabel.getLabel() + "') ");
+
+                    stmt.addBatch(sb.toString());
+
+                    if (imageLabel.getId() % 1000 == 0) {
+                        executeSQLBatch(stmt);
+                        System.out.println("Image label " + imageLabel.getId() + "inserted.");
+
+                    }
+                }
+
+            }
+        }
+        finally {
+
+                try {
+                    if(stmt != null) {
+                        stmt.executeBatch();
+                        stmt.close();
+                    }
+                    conn.setAutoCommit(true);
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+        }
+
+    }
     private static void setDatabaseActive(boolean databaseActive) {
         isDatabaseActive = databaseActive;
         if(isDatabaseActive == false)

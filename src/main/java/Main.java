@@ -19,20 +19,27 @@ import java.util.*;
 
 public class Main {
 
-    private static Gson gson = new Gson();
-
     public static void main(String[] args) throws ParserConfigurationException, SAXException, IOException {
 
         List<User> users = null;
+        HashMap<String, ArrayList<ImageLabel> > imageLabelMap = null;
+
         String xmlFile = "NTCIR13_stage2.xml";
-        String imageLabelsFile = "NTCIR13_lifelog_concepts.csv";
+        String imageLabelsFile = "src/main/resources/NTCIR13_lifelog_concepts.csv";
+        String labelSummaryOutFile = null;
+        //labelSummaryOutFile = "labels.txt";
 
         try {
             users = parseXmlFile(xmlFile);
-            mongoDBOperations(users);
-            //databaseOperations(users);
+            imageLabelMap = parseImageLabels(imageLabelsFile, labelSummaryOutFile);
+            databaseOperations(users, imageLabelMap);
+            mongoDBOperations(users, imageLabelMap);
+
             //printDataSummary(users);
-            //parseImageLabels(imageLabelsFile);
+
+
+
+            //  db.Minutes.find({"images" : { $elemMatch : {"path" : "u2/2016-09-09/20160909_074643_000.jpg"}}}).toArray()
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -41,87 +48,16 @@ public class Main {
 
     }
 
-    private static void mongoDBOperations(List<User> users)
+    private static void mongoDBOperations(List<User> users, HashMap<String, ArrayList<ImageLabel> > imageLabelMap)
     {
+
         final String DB_NAME = "NTCIR13LifelogDataset";
 
-        System.out.println("Accessing MongoDB...");
-        MongoClient mongoClient = new MongoClient();
+        MongoDBController.createController(DB_NAME);
+        MongoDBController.connectDatabase();
+        MongoDBController.populateDatabase(users, imageLabelMap);
 
-        List<String> collList = new ArrayList<>();
-        MongoDatabase database = mongoClient.getDatabase(DB_NAME);
-        database.listCollectionNames().into(collList);
-        if(collList.size()>0)
-        {
-            database.drop();
-            database = mongoClient.getDatabase(DB_NAME);
-        }
 
-        MongoCollection<Document> collectionUsers = database.getCollection("Users");
-        MongoCollection<Document> collectionDays = database.getCollection("Days");
-        MongoCollection<Document> collectionMinutes = database.getCollection("Minutes");
-
-        System.out.println("Database and collections are created.");
-
-        for(User user : users)
-        {
-            Document newUser = new Document("_id", user.getId()).
-                    append("user_name", user.getUserId());
-            collectionUsers.insertOne(newUser);
-
-            List<Day> days = user.getDays();
-            List<Document> docDayList = new ArrayList<>();
-            for(Day day : days)
-            {
-                Document newDay = new Document("_id", day.getId());
-                newDay.append("user_id", user.getId());
-                newDay.append("date", day.getDate());
-                newDay.append("image_directory", day.getImageDirectory());
-                newDay.append("day_metrics", formatObjectAsDocument(day.getDayMetrics()));
-                newDay.append("day_activities", formatObjectAsDocument(day.getDayActivities()));
-                newDay.append("health_logs", formatObjectAsDocument(day.getHealthLogs()));
-                List<Document> docFoodLogs = new ArrayList<>();
-                day.getFoodLogs().stream().forEach((log)->docFoodLogs.add(formatObjectAsDocument(log)));
-                newDay.append("food_logs", docFoodLogs);
-
-                List<Document> docDrinkLogs = new ArrayList<>();
-                day.getFoodLogs().stream().forEach((log)->docDrinkLogs.add(formatObjectAsDocument(log)));
-                newDay.append("drink_logs", docDrinkLogs);
-
-                docDayList.add(newDay);
-
-                List<Minute> minutes = day.getMinutes();
-                List<Document> docMinuteList = new ArrayList<>();
-                for(Minute minute : minutes)
-                {
-                    Document newMinute = formatObjectAsDocument(minute);
-                    newMinute.append("day_id", day.getId());
-                    newMinute.append("user_id", user.getId());
-
-                    docMinuteList.add(newMinute);
-                }
-
-                collectionMinutes.insertMany(docMinuteList);
-
-            }
-
-            collectionDays.insertMany(docDayList);
-
-        }
-
-        //String jsonString = gson.toJson(users.get(0).getDays().get(0).getMinutes().get(0));
-
-        //System.out.println(jsonString);
-
-    }
-
-    private static Document formatObjectAsDocument(Object obj)
-    {
-        if(obj == null)
-            return null;
-
-        Document result = Document.parse(gson.toJson(obj));
-        return result;
     }
 
     private static List<User> parseXmlFile(String filename) throws ParserConfigurationException, SAXException, IOException {
@@ -138,9 +74,9 @@ public class Main {
         return handler.getUsers();
     }
 
-    private static void databaseOperations(List<User> users) throws SQLException, ClassNotFoundException {
+    private static void databaseOperations(List<User> users, HashMap<String, ArrayList<ImageLabel> > imageLabelMap) throws SQLException, ClassNotFoundException {
 
-        // JDBC driver name and main.java.database URL
+        // JDBC driver name and database URL
         final String JDBC_DRIVER = "com.mysql.cj.jdbc.Driver";
         final String URL = "jdbc:mysql://localhost?serverTimezone=UTC";
         final String DB_NAME = "NTCIR13";
@@ -156,44 +92,106 @@ public class Main {
 
         DatabaseController.createController(JDBC_DRIVER, URL, DB_NAME, USERNAME, PASSWORD);
         DatabaseController.connectDatabase();
-        System.out.println("Database conection established.");
+        System.out.println("MySQL database conection established.");
+
 
         DatabaseController.createDatabaseTables();
-        DatabaseController.populateDatabase(users);
 
+        try {
+            DatabaseController.populateDatabase(users);
+        } catch (Exception e) {
+            //e.printStackTrace();
+            System.out.println("WARNING: User data is already stored in the database.");
+        }
+
+        try {
+            DatabaseController.insertImageLabels(imageLabelMap);
+        } catch (Exception e) {
+            //e.printStackTrace();
+            System.out.println("WARNING: Image labels are already stored in the database.");
+        }
 
     }
 
 
-    private static void parseImageLabels(String filename) throws IOException {
+    private static HashMap<String, ArrayList<ImageLabel> > parseImageLabels(String filename, String outFile) throws IOException {
 
-        Scanner scanner = new Scanner(new FileInputStream(new File(filename)));
-        FileWriter writer = new FileWriter("res/labels.txt");
+        Scanner scanner = new Scanner(new FileInputStream(filename));
+
         HashMap<String , Integer> labelMap = new HashMap<>();
+        HashMap< String, ArrayList<ImageLabel> > imageLabelMap = new HashMap<>();
+
+        // Read label file
         String label = null;
+        String imageId = null;
+        String prevImageId = null;
+
+        ArrayList<ImageLabel> labelList = null;
+
+        System.out.println("Parsing image labels...");
         while(scanner.hasNext())
         {
-            label = scanner.nextLine().split(",")[1];
+            String[] tokens = scanner.nextLine().split(",");
+            if(!tokens[0].contains("jpg"))
+                continue;
+
+            imageId = parseImageId(tokens[0]);
+            ImageLabel imageLabel = new ImageLabel(imageId, tokens[1]);
+
+            if(!imageId.equals(prevImageId))
+            {
+                if(prevImageId != null)
+                {
+                    imageLabelMap.put(prevImageId, labelList);
+                }
+                labelList = new ArrayList<>();
+                prevImageId = imageId;
+            }
+
+            labelList.add(imageLabel);
+
             Integer cnt = labelMap.get(label);
             if(cnt == null)
                 labelMap.put(label, 1);
             else
                 labelMap.put(label, cnt + 1);
         }
+        scanner.close();
 
-        int i = 0;
-        Set<String> keys = labelMap.keySet();
-        for(String key : keys)
-        {
-            writer.write(++i + "-" + key + "-" + labelMap.get(key) + "\n");
+        // Print labels summary
+        if(outFile != null) {
+            int i = 0;
+            Set<String> keys = labelMap.keySet();
+            FileWriter writer = new FileWriter(outFile);
+            for (String key : keys) {
+                writer.write(++i + "-" + key + "-" + labelMap.get(key) + "\n");
 
-            if(i % 100 == 0)
-                writer.flush();
+                if (i % 100 == 0)
+                    writer.flush();
+            }
+
+            writer.flush();
+            writer.close();
         }
 
-        writer.flush();
-        writer.close();
-        scanner.close();
+
+        return imageLabelMap;
+
+    }
+
+    private static String parseImageId(String str)
+    {
+        String[] idTokens = str.split("/");
+        String user = idTokens[0];
+        String img = idTokens[1];
+
+        String year = img.substring(0,4);
+        String month = img.substring(4,6);
+        String day = img.substring(6,8);
+
+        StringBuilder result = new StringBuilder(user + "/" + year + "-" + month + "-" + day + "/" + img);
+
+        return result.toString();
 
     }
 

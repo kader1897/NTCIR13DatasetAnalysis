@@ -1,7 +1,7 @@
 <project>
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.kader.ntcir</groupId>
-    <artifactId>ntcir13-dataset-analysis</artifactId>
+    <artifactId>NTCIR13DatasetAnalysis</artifactId>
     <version>1</version>
 
 
