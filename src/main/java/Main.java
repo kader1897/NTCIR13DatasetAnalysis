@@ -1,16 +1,9 @@
-import com.google.gson.Gson;
-import com.mongodb.MongoClient;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import model.*;
-import org.bson.Document;
 import org.xml.sax.SAXException;
 
-import javax.print.Doc;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -27,13 +20,18 @@ public class Main {
         String xmlFile = "NTCIR13_stage2.xml";
         String imageLabelsFile = "src/main/resources/NTCIR13_lifelog_concepts.csv";
         String labelSummaryOutFile = null;
-        //labelSummaryOutFile = "labels.txt";
+        labelSummaryOutFile = "labels.txt";
+        String labelOutFile = "activeLabels.txt";
+        String dataOutFile = "data.txt";
 
         try {
             users = parseXmlFile(xmlFile);
             imageLabelMap = parseImageLabels(imageLabelsFile, labelSummaryOutFile);
+
             databaseOperations(users, imageLabelMap);
             mongoDBOperations(users, imageLabelMap);
+
+            generateDataFile(users, imageLabelMap, dataOutFile, labelOutFile);
             printDataSummary(users);
 
             //  db.Minutes.find({"images" : { $elemMatch : {"path" : "u2/2016-09-09/20160909_074643_000.jpg"}}}).toArray()
@@ -42,6 +40,79 @@ public class Main {
             e.printStackTrace();
         }
 
+
+    }
+
+    private static void generateDataFile(List<User> users, HashMap<String, ArrayList<ImageLabel>> imageLabelMap, String dataOutFile, String labelOutFile) throws IOException {
+
+        FileWriter writer = new FileWriter(dataOutFile);
+        FileWriter labelDataWriter = new FileWriter(labelOutFile);
+
+        HashMap<String, Integer> labelMap = new HashMap<>();
+        for(User user : users)
+        {
+            List<Day> days = user.getDays();
+            for(Day day : days)
+            {
+                List<Minute> minutes = day.getMinutes();
+                for(Minute minute : minutes)
+                {
+                    if(minute.getActivity() == null)
+                        continue;
+
+                    List<Image> images = minute.getImages();
+                    List<String> imageLabelList = new ArrayList<>();
+                    images.forEach(image -> {
+                        if(imageLabelMap.containsKey(image.getPath()))
+                        {
+                            imageLabelMap.get(image.getPath()).forEach(imageLabel -> {
+
+                                String label = imageLabel.getLabel();
+                                Integer cnt = labelMap.get(label);
+
+                                imageLabelList.add(label);
+                                if(cnt == null)
+                                    labelMap.put(label, 1);
+                                else
+                                    labelMap.put(label, cnt + 1);
+                            });
+                        }
+                    });
+
+                    if(imageLabelList.size() <= 0)
+                        continue;
+
+
+                    imageLabelList.forEach(label -> {
+                        try {
+
+                            writer.write(label + ",");
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    });
+
+                    writer.write(minute.getActivity());
+                    writer.write("\n");
+                }
+                writer.flush();
+            }
+        }
+        writer.flush();
+        writer.close();
+
+        Set<String> labels = labelMap.keySet();
+        int i = 0;
+        for(String label : labels)
+        {
+            labelDataWriter.write(++i + "," + label + "," + labelMap.get(label) + "\n");
+
+            if(i % 1000 == 0)
+                labelDataWriter.flush();
+        }
+
+        labelDataWriter.flush();
+        labelDataWriter.close();
 
     }
 
@@ -122,6 +193,7 @@ public class Main {
         String label = null;
         String imageId = null;
         String prevImageId = null;
+        Integer cnt = null;
 
         ArrayList<ImageLabel> labelList = null;
 
@@ -147,7 +219,9 @@ public class Main {
 
             labelList.add(imageLabel);
 
-            Integer cnt = labelMap.get(label);
+            label = imageLabel.getLabel();
+            cnt = labelMap.get(label);
+
             if(cnt == null)
                 labelMap.put(label, 1);
             else
@@ -161,7 +235,7 @@ public class Main {
             Set<String> keys = labelMap.keySet();
             FileWriter writer = new FileWriter(outFile);
             for (String key : keys) {
-                writer.write(++i + "-" + key + "-" + labelMap.get(key) + "\n");
+                writer.write(++i + "," + key + "," + labelMap.get(key) + "\n");
 
                 if (i % 100 == 0)
                     writer.flush();

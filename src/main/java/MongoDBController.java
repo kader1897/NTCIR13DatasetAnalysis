@@ -78,14 +78,14 @@ public class MongoDBController {
                     newMinute.append("user_id", user.getId());
 
                     List<Image> images = minute.getImages();
-                    Set<String> imageLabelSet = new HashSet<>();
+                    List<String> imageLabelList = new ArrayList<>();
                     images.forEach(image -> {
                         if(imageLabelMap.containsKey(image.getPath()))
                         {
-                            imageLabelMap.get(image.getPath()).forEach(label -> imageLabelSet.add(label.getLabel()));
+                            imageLabelMap.get(image.getPath()).forEach(label -> imageLabelList.add(label.getLabel()));
                         }
                     });
-                    newMinute.append("image_labels", imageLabelSet);
+                    newMinute.append("image_labels", imageLabelList);
 
                     docMinuteList.add(newMinute);
                 }
